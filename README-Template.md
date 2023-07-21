@@ -17,65 +17,24 @@ Is the folders that contains all the source codes. There are two files in that f
 
 ### LM_model.Rmd file that includes:
 
-a) set up section: the place you set up information about dataset and required 
+a) set up section: the place you set up information about dataset and required informations are compiled in this section
 
 b) Load Data section: all the preprocessing, required normalization, transformation and encoding need to be done. 
 
 c) three model approaches:
   1) Very trivial(no model):
-    Just spearman correlation of ranced data between different pairs of predictors and tasks
+    Just spearman correlation of ranked data between different pairs of predictors and tasks
     
-  2) 
+  2) one predictor LM model:
+    is a linear regression model that is trained by one predictor for each task
+    
+  3) multi predictor LM model:
+    a linea regression that is trained based on different combination and number of predictors to predict each task
   
+### LASSO_model.Rmd file that includes:
+a) set up section: the place you set up information about dataset and required informations are compiled in this section
+
+b) multi predictor LASSO model:
+    a lASSO regression that is trained based on different combination and number of predictors to predict each task
 
 
-* Describe any prerequisites, libraries, OS version, etc., needed before installing program.
-* ex. Windows 10
-
-### Installing
-
-* How/where to download your program
-* Any modifications needed to be made to files/folders
-
-### Executing program
-
-* How to run the program
-* Step-by-step bullets
-```
-code blocks for commands
-```
-
-## Help
-
-Any advise for common problems or issues.
-```
-command to run if program contains helper info
-```
-
-## Authors
-
-Contributors names and contact info
-
-ex. Dominique Pizzie  
-ex. [@DomPizzie](https://twitter.com/dompizzie)
-
-## Version History
-
-* 0.2
-    * Various bug fixes and optimizations
-    * See [commit change]() or See [release history]()
-* 0.1
-    * Initial Release
-
-## License
-
-This project is licensed under the [NAME HERE] License - see the LICENSE.md file for details
-
-## Acknowledgments
-
-Inspiration, code snippets, etc.
-* [awesome-readme](https://github.com/matiassingers/awesome-readme)
-* [PurpleBooth](https://gist.github.com/PurpleBooth/109311bb0361f32d87a2)
-* [dbader](https://github.com/dbader/readme-template)
-* [zenorocha](https://gist.github.com/zenorocha/4526327)
-* [fvcproductions](https://gist.github.com/fvcproductions/1bfc2d4aecb01a834b46)

@@ -1,0 +1,955 @@
+---
+title: "LM Model for CMIPB"
+output: html_document
+date: "2023-07-20"
+"https://www.dataquest.io/blog/statistical-learning-for-predictive-modeling-r/"
+---
+
+### Load required libraries
+```{r}
+suppressWarnings({library(omicade4)
+library(mogsa)
+library(RSpectra)
+library(lubridate)
+library(dplyr)
+library(cowplot)
+library(ggplot2)
+library(reshape2)
+library(DBI)
+# library(RPostgreSQL)
+library(tidyr)
+library(readr)
+library(tibble)
+library(tidyverse)
+library(BatchQC)
+library(sva)
+library(RcmdrMisc)
+library('rstatix')
+library("Hmisc")
+library(corrplot)
+library(GGally)
+library(gridExtra)
+library(ggpubr)
+library(data.table)
+library(here)
+  })
+```
+
+
+### Set up new directories
+```{r}
+
+DEMOGRAPHY_COLS <- c("age_at_boost", "infancy_vac", "biological_sex")
+
+ABTITER_COLS <- c("IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0','IgG1_FHA_day0','IgG4_PT_day0', 'IgG4_FHA_day0',
+                   "IgG_PT_day14",'IgG_FHA_day14','IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14', 'IgG4_PT_day14','IgG4_FHA_day14')
+
+CELL_COLS <- c("Monocytes_day0", "Monocytes_day1", "CD4Tcells_day0", 
+               "CD4Tcells_day3", "ASCs..Plasmablasts._day0", "ASCs..Plasmablasts._day7")
+
+RNA_COLS <- c("CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0", 
+              "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14")
+
+
+"Dataset 2020 ****************************************************************************************************************"
+subDir <- "dataset2020"
+dataFile <- "dataset2020.csv"
+readyToUseFile <- "dataset2020_logTransformed_encoded.csv"
+
+# REMOVE_OUTLIERS <- TRUE
+REMOVE_OUTLIERS <- FALSE
+
+LOG_TRANSFORM <- TRUE
+# LOG_TRANSFORM <- FALSE
+
+LOG_TRANS_COLS <- c( "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
+                    'IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14','IgG4_PT_day14','IgG4_FHA_day14')
+
+# NEGATIVE_COLS <-RNA_COLS
+NEGATIVE_COLS <- c()
+
+"Dataset 2021 ****************************************************************************************************************"
+# subDir <- "dataset2021"
+# dataFile <- "dataset2021.csv"
+# readyToUseFile <- "dataset2021_logTransformed_encoded.csv"
+# 
+# # REMOVE_OUTLIERS <- TRUE
+# REMOVE_OUTLIERS <- FALSE
+# 
+# LOG_TRANSFORM <- TRUE
+# # LOG_TRANSFORM <- FALSE
+# 
+# LOG_TRANS_COLS <- c("CCL3_day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0','IgG1_FHA_day0',
+#                     'IgG4_PT_day0','IgG4_FHA_day0', "IL6_day0", "NFKBIA_day0", "XIST_day0",
+#                     "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
+#                     'IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14','IgG4_PT_day14','IgG4_FHA_day14')
+# 
+# # NEGATIVE_COLS <-RNA_COLS
+# NEGATIVE_COLS <- c()
+
+"Combined Dataset ****************************************************************************************************************"
+# subDir <- "combined_datasets2020_2021"
+# dataFile <- "combined_dataset2020_2021_batchCorrected.csv"
+# readyToUseFile <- "combined_dataset2020_2021_batchCorrected_logTransformed_encoded.csv"
+# 
+# # REMOVE_OUTLIERS <- TRUE
+# REMOVE_OUTLIERS <- FALSE
+# 
+# LOG_TRANSFORM <- TRUE
+# # LOG_TRANSFORM <- FALSE
+# 
+# LOG_TRANS_COLS <- c("CCL3_day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0','IgG1_FHA_day0',
+#                     'IgG4_PT_day0','IgG4_FHA_day0', "IL6_day0", "NFKBIA_day0", "XIST_day0",
+#                     "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
+#                     'IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14','IgG4_PT_day14','IgG4_FHA_day14')
+# 
+# NEGATIVE_COLS <-RNA_COLS
+# # NEGATIVE_COLS <- c()
+
+"Create subdirectories ****************************************************************************************************************"
+dir.create(here(file.path('./results', subDir)), showWarnings = FALSE)
+
+subDir_trivial <- "1_veryTrivial"
+dir.create(here(file.path('./results', subDir, subDir_trivial)), showWarnings = FALSE)
+
+subDir_onePredictor <- "2_onePredictor"
+dir.create(here(file.path('./results', subDir, subDir_onePredictor)), showWarnings = FALSE)
+
+subDir_multiPredictor <- "3_multiPredictor"
+dir.create(here(file.path('./results', subDir, subDir_multiPredictor)), showWarnings = FALSE)
+
+target_cols <- c("age_at_boost", "Monocytes_day0", "Monocytes_day1","CCL3_day0", "CCL3_day3", "IgG_PT_day0", "IgG_PT_day14")
+ranked_cols <- paste("ranked", target_cols, sep="_")
+
+```
+
+### Load Data 
+This data was downloaded from CMI PB Database and required features been selected and saved in a CSV files
+Some columns been renamed 
+Ranked column been generated for age and experimental columns
+Categorical features been label encoded
+log transformed required columns
+```{r}
+
+df_source <- read.csv(here(file.path("./data/", dataFile)))
+
+rankingFunction <- function(x) {
+  as.numeric(rank(x, ties.method = "average", na.last = "keep"))
+}
+
+df_source[, ranked_cols] <- apply(df_source[, target_cols], 2, rankingFunction)
+
+df_source$infancy_vac <- as.numeric(factor(df_source$infancy_vac, labels = c(1,2), levels = c("wP", "aP"), exclude = NA))
+df_source$biological_sex <- as.numeric(factor(df_source$biological_sex, labels = c(1,2), exclude = NA))
+
+df <- df_source
+
+# TO DO: why do we have neg value in Combat results: (I still need to dig into deeper understand the internal process of ComBat but in general it is not considered as good algorithm for RNA seq data "svaseq" considered to be a better choice. Please let me know what do you think)
+
+## "Its probably best to use ComBat on logged data. ComBat assumes that the data symmetric and bell-shaped. If you are still getting negative values, you can set anything negative to 0."
+
+# Combat assumes normally distributed data, which is probably best approximated by log-normalized data. It fits a gene-specific batch effect, which is then subtracted from the data. If some cells in one batch happen to have 0 expression values, this becomes negative. You can deal with these values in two ways:
+# 
+# Set them to 0.
+# Keep the negative values.
+# In scenario 1 you interpret the expression values as absolute measurements. 0 is the lower threshold for these. In scenario 2, you interpret the values as relative measurements. Keeping the negative values would conserve the relative expression differences. I wouldn’t take the absolute value though. On another note, setting to 0 also has the added benefit that you may be able to continue using a sparse matrix representation, which is why this is sometimes preferred.
+
+# So the typical analysis workflow would involve the order:
+# 
+# Read in the data
+# Cell and gene QC
+# Normalization (+ log transformation if applicable)
+# Data correction (includes batch correction and regressing out other covariates).
+
+if (LOG_TRANSFORM){
+  for (ltCol in LOG_TRANS_COLS){
+    if (ltCol %in% RNA_COLS & length(NEGATIVE_COLS)!=0){
+      minCol <- min(df[, ltCol], na.rm = TRUE)
+      addedMin <- df[, ltCol]+abs(minCol)+1
+      logTf <- log2(df[, ltCol]+abs(minCol)+1)
+      df[, ltCol] <- logTf
+    }else{
+      df[, ltCol] <- log2(df[, ltCol]+1)
+    }
+  }
+}
+
+write.csv(df, here(paste("./results/",subDir, "/", readyToUseFile, sep = "")), row.names = FALSE)
+```
+
+
+### Cumulative distribution function (CDF) and plot
+```{r}
+cumulCurve <- function(df, colName){
+  df <- na.omit(df[, c("subject_id", colName)])
+  df <- df[order(df[, colName]),]
+  
+  df[, 'cumSum'] <- cumsum(df[,2])
+  df[, 'orderNumber'] <- 1:dim(df)[1]
+  
+  ggplot(data=df, aes(x=orderNumber, y=cumSum)) +
+  geom_line()+
+  geom_point()+
+  labs(x="Order Number", y=colName)+
+  ggtitle(paste("Outliers of", colName))
+}
+```
+
+
+### Plot CDF
+```{r}
+
+if (LOG_TRANSFORM){
+  expCols <- c(CELL_COLS, RNA_COLS, ABTITER_COLS)
+  
+  for (i in 1:length(expCols)){
+    if (expCols[i] %in% LOG_TRANS_COLS){
+      p <- cumulCurve(df_source, expCols[i])
+      ggsave(p, file=here(paste("./results/", subDir,"/cumul_notTransformed_", expCols[i],".png", sep="")), width = 5, height = 5 , units = 'in')
+      
+      p <- cumulCurve(df, expCols[i])
+      ggsave(p, file=here(paste("/results/", subDir,"/cumul_transformed_", expCols[i],".png", sep="")), width = 5, height = 5 , units = 'in')
+    }else{
+      p <- cumulCurve(df_source, expCols[i])
+      ggsave(p, file=here(paste("./results/", subDir,"/cumul_", expCols[i],".png", sep="")), width = 5, height = 5 , units = 'in')
+    }
+  }
+}
+
+```
+
+
+### Box plot function
+```{r}
+outlierBox <- function(df, varCols, title, dest){
+  print(c('varcols', varCols))
+  mDf <- melt(df[, varCols])
+  print(colnames(mDf))
+  
+  p<- ggplot(mDf, aes(x=variable, y=value))+
+    geom_boxplot(fill="#AE4371")+
+    # coord_flip()+
+    stat_boxplot(geom='errorbar')+
+    xlab(title) +
+    theme(axis.title.x = element_text (face = "bold"),
+          axis.text.x = element_text(angle = 35, vjust = 0.4, hjust=0.3),
+          axis.title.y = element_blank())
+  
+  ggsave(p, file=dest, width = 2, height = 5 , units = 'in')
+}
+```
+
+
+### Outlier detection box plot
+```{r}
+df <- read.csv(here(paste("./results/", subDir, "/", readyToUseFile, sep="")))
+
+experiments <- list(RNA=c("CCL3_day0", "CCL3_day3"), ab_titer=c("IgG_PT_day0", "IgG_PT_day14"))
+
+for (exp in names(experiments)){
+  outlierBox(df, experiments[[exp]], exp, here(paste("./results/", subDir,"/boxPlot_", exp,".png", sep="")))
+}
+```
+
+
+### scatter plot and pearson correlation
+```{r}
+xCols <- c("age_at_boost", "Monocytes_day0", "CD4Tcells_day0", 
+           "ASCs..Plasmablasts._day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0',
+           'IgG1_FHA_day0','IgG4_PT_day0', 'IgG4_FHA_day0', "CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0")
+
+png(here(paste("./results/", subDir, "/scatterPlot.png", sep = "")), width = 16, height = 16, units = 'in', res = 300 )
+ggpairs(data=df[,xCols])
+dev.off()
+
+xCols <- c("age_at_boost", "biological_sex", "infancy_vac", "Monocytes_day0", "CD4Tcells_day0", 
+           "ASCs..Plasmablasts._day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0',
+           'IgG1_FHA_day0','IgG4_PT_day0', 'IgG4_FHA_day0', "CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0")
+
+png(here(paste("./results/", subDir, "/scatterPlot_all.png", sep = "")), width = 16, height = 16, units = 'in', res = 300 )
+ggpairs(data=df[, xCols])
+dev.off()
+
+```
+
+### 1) Very Trivial Analysis 
+1. Calculate ranks of predictors e.g. baseline values and age. 
+2. Calculate ranks of tasks 
+3. calculate spearman correlation of step 1 and 2 ranks
+```{r}
+
+x <- c("ranked_age_at_boost", ranked_cols[grepl('day0', ranked_cols)])
+y <- ranked_cols[!ranked_cols %in% x ]
+df1 <- df
+
+correlation_df<- t(cor(df1[,x], df1[,y], method="spearman", use= "pairwise.complete.obs"))
+pcor <- cor.mtest(as.matrix(df1[,ranked_cols]), method="spearman", conf.level = 0.95, na.rm = TRUE)
+
+pcor <- pcor$p[y, x]
+
+colnames(correlation_df) <- gsub("ranked_", "", colnames(correlation_df))
+row.names(correlation_df) <- gsub("ranked_", "", row.names(correlation_df))
+
+colnames(pcor) <- gsub("ranked_", "", colnames(pcor))
+row.names(pcor) <- gsub("ranked_", "", row.names(pcor))
+# 
+
+maxCorr <- max(abs(as.matrix(correlation_df)), na.rm = T)
+png(here(paste("./results/", subDir,"/", subDir_trivial, "/correlationHeatmap_spearman_0.95Confidence.png", sep = "")), width = 10, height = 5, units = 'in', res = 300 )
+corrplot(correlation_df, tl.col = 'black', addCoef.col = 1,
+         p.mat = pcor, sig.level = 0.05, number.cex = 1.5, tl.srt = 45,
+         col.lim = c(-maxCorr, maxCorr),
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir,"/", subDir_trivial, "/correlationHeatmap_spearman_0.99Confidence.png", sep="")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(correlation_df, tl.col = 'black', addCoef.col = 1,
+         p.mat = pcor, sig.level = 0.01, number.cex = 1.5, tl.srt = 45,
+         col.lim = c(-maxCorr, maxCorr),
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+```
+
+### Function for regression plot
+```{r}
+regPlot <- function(df, xCol, yCol,title){
+  df$infancy_vac[df$infancy_vac==1] <- "wP"
+  df$infancy_vac[df$infancy_vac==2] <- "aP"
+  
+  p <- ggplot(data = df, aes_string(x= xCol, y = yCol, label= "subject_id")) +
+  geom_text(aes(colour=factor(infancy_vac))) +
+  scale_color_manual(values=c("red", "springGreen4")) +
+  labs(colour= "Vaccine Type") +
+  stat_smooth(method = "lm", col = "dodgerblue3") +
+  theme(panel.background = element_rect(fill = "white"),
+  axis.line.x=element_line(),
+  axis.line.y=element_line()) +
+  ggtitle(title)+
+  stat_cor(method = "spearman")
+  }
+```
+
+
+### 2) Linear model with one predictor
+1. age been used as predictor for all the tasks
+2. the baseline of each task been used as its predictor
+
+## leave one out cross validation been used to estimate model quality
+```{r}
+
+set.seed(0)
+
+onePredictor <- list(c("age_at_boost","Monocytes_day1"), c("age_at_boost","CCL3_day3"), c("age_at_boost","IgG_PT_day14"),
+                     c("Monocytes_day0", "Monocytes_day1"), c("Monocytes_day0", "CCL3_day3"), c("Monocytes_day0", "IgG_PT_day14"),
+                     c("CCL3_day0", "Monocytes_day1"), c("CCL3_day0", "CCL3_day3"),  c("CCL3_day0", "IgG_PT_day14"),  
+                     c("IgG_PT_day0", "Monocytes_day1"), c("IgG_PT_day0", "CCL3_day3"), c("IgG_PT_day0", "IgG_PT_day14"))
+
+correlation_pred_true <- data.frame()
+pval_pred_true <- data.frame()
+
+for (comb in onePredictor){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", comb)])
+
+  predVals <- c()
+  trueVals<- c()
+  subjId <- c()
+  vacType <- c()
+  
+  modelsList <- paste(comb[2], "~", comb[1])
+  
+  p <- regPlot(subDf, comb[1], comb[2], paste(comb[2], "against", comb[1]))
+  ggsave(p, file=here(paste("./results/", subDir, "/", subDir_onePredictor,"/", comb[2],'_', comb[1], ".png", sep="")), width = 5, height = 5 , units = 'in')
+  
+  for (i in 1:nrow(subDf)){
+    
+    fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+    
+    predictor <- data.frame(subDf[i, comb[1]])
+    
+    colnames(predictor) <- comb[1]
+    predVals <- c(predVals, predict(fit_1, predictor))
+    trueVals <- c(trueVals, subDf[i, comb[2]])
+    subjId <- c(subjId, subDf[i, "subject_id"])
+    vacType <- c(vacType, subDf[i, "infancy_vac"])
+  }
+
+  trueVals <- rank(trueVals, ties.method = "average", na.last = "keep")
+  predVals <- rank(predVals, ties.method = "average", na.last = "keep")
+  
+  predDf <- data.frame(trueVals, predVals)
+  colnames(predDf) <- c('True_values', 'Predicted_values')
+  
+  predDf[, "subject_id"] <- subjId
+  predDf[, "infancy_vac"] <- vacType
+  
+  p <- regPlot(predDf, 'True_values', 'Predicted_values', paste(comb[2], "against", comb[1]))
+  ggsave(p, file=here(paste("./results/", subDir, "/", subDir_onePredictor,"/predictedTrue_", comb[1],'_', comb[2], ".png", sep="")), width = 5, height = 5 , units = 'in')
+  
+  correlations <- cor.test(trueVals, predVals, method="spearman")
+  pval_pred_true[comb[1], comb[2]] <- correlations$p.value
+  correlation_pred_true[comb[1], comb[2]] <- correlations$estimate
+}
+
+maxCorr <- max(abs(as.matrix(correlation_pred_true)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_onePredictor,"/correlationHeatmap_pred_true_spearman_0.95Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(correlation_pred_true)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE, na.label = " ",
+         p.mat = t(as.matrix(pval_pred_true)), sig.level = 0.05, number.cex = 1.5, tl.srt = 45,
+         col.lim = c(-maxCorr, maxCorr),
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_onePredictor,"/correlationHeatmap_pred_true_spearman_0.99Confidence.png", sep = "")), width = 10, height = 5, units = 'in', res = 300 )
+corrplot(t(as.matrix(correlation_pred_true)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE, na.label = " ",
+         p.mat = t(as.matrix(pval_pred_true)), sig.level = 0.01, number.cex = 1.5, tl.srt = 45,
+         col.lim = c(-maxCorr, maxCorr),
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+```
+
+## the coefficient of regression line of task agains predictors been estimated for feature selection
+```{r}
+set.seed(0)
+
+gList <- list()
+coefDf <- data.frame()
+pvalDf <- data.frame()
+
+for (comb in onePredictor){
+  subDf <- na.omit(df[, comb])
+  modelsList <- paste(comb[2], "~", comb[1])
+  fit_1 <- lm(modelsList, data=subDf, na.action=na.exclude)
+  sum1 <- summary(fit_1)
+  mCoeff <- as.matrix(sum1$coefficients)
+  coefDf[comb[1], comb[2]] <- mCoeff[comb[1], "Estimate"]
+  pvalDf[comb[1], comb[2]] <- mCoeff[comb[1], "Pr(>|t|)"]
+}
+
+maxCoef <- max(abs(as.matrix(coefDf)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_onePredictor,"/correlationHeatmap_regression_0.95Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf)), sig.level = 0.05, number.cex = 0.8, na.label = " ",
+         col.lim =c(-maxCoef, maxCoef), tl.srt = 45, 
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_onePredictor,"/correlationHeatmap_regression_0.99Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf)), sig.level = 0.01, number.cex = 0.8, na.label = " ",
+         col.lim =c(min(as.matrix(coefDf), na.rm = TRUE), max(as.matrix(coefDf), na.rm = TRUE)), tl.srt = 45, 
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+```
+
+### 3) Linear model with multiple predictors
+Baseline of all three tasks combined with age, biological sex and infancy vaccine type been used to predict each of the three tasks
+
+1. only demographic
+2. only 3 baseline 
+3. 3 baseline + demographic
+4. 14 baseline
+5. 14 baseline + demographic
+
+### 1. only demographic
+## leave one out cross validation been used to estimate model quality
+```{r}
+set.seed(0)
+
+x <- c("age_at_boost", "infancy_vac", "biological_sex")
+
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+correlation_pred_true <- data.frame(row.names = y)
+pval_pred_true <- data.frame(row.names = y)
+
+coefDf_multi <- data.frame(row.names = x)
+pvalDf_multi <- data.frame(row.names = x)
+
+for (j in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x,y[j])])
+  
+  predVals <- c()
+  trueVals<- c()
+  subjId <- c()
+  vacType <- c()
+  
+  modelsList <- paste(y[j], "~", str_flatten(x, ' + '))
+  
+  for (i in 1:nrow(subDf)){
+    
+    fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+    predictor <- data.frame(subDf[i, x])
+    colnames(predictor) <- x
+    
+    predVals <- c(predVals, predict(fit_1, predictor))
+    trueVals <- c(trueVals, subDf[i, y[j]])
+    subjId <- c(subjId, subDf[i, "subject_id"])
+    vacType <- c(vacType, subDf[i, "infancy_vac"])
+  }
+  
+  trueVals <- rank(trueVals, ties.method = "average", na.last = "keep")
+  predVals <- rank(predVals, ties.method = "average", na.last = "keep")
+  
+  correlations <- cor.test(trueVals, predVals, method="spearman")
+  correlation_pred_true[y[j],"Demographic"] <- correlations$estimate
+  pval_pred_true[y[j],"Demographic"] <- correlations$p.value
+  
+  predDf <- data.frame(trueVals, predVals)
+  colnames(predDf) <- c('True_values', 'Predicted_values')
+  predDf[, "subject_id"] <- subjId
+  predDf[, "infancy_vac"] <- vacType
+  
+  p <- regPlot(predDf, 'True_values', 'Predicted_values', paste(y[j], "against Demography"))
+  ggsave(p, file=here(paste("./results/", subDir, "/", subDir_multiPredictor,'/predictedTrue_demographic_', y[j], ".png", sep="")), width = 5, height = 5 , units = 'in')
+}
+
+```
+
+## the coefficient of regression line of task agains predictors been estimated for feature selection
+```{r}
+set.seed(0)
+
+x <- c("age_at_boost", "infancy_vac", "biological_sex")
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+coefDf_multi <- data.frame(row.names = x)
+pvalDf_multi <- data.frame(row.names = x)
+for (i in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x, y[i])])
+  
+  modelsList <- paste(y[i], "~", str_flatten(x, ' + '))
+  
+  fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+  
+  sum1 <- summary(fit_1)
+  mCoeff <- as.matrix(sum1$coefficients)
+  
+  coefDf_multi[y[i]] <- mCoeff[2:nrow(mCoeff), "Estimate"]
+  pvalDf_multi[y[i]] <-  mCoeff[2:nrow(mCoeff), "Pr(>|t|)"]
+}
+
+maxCoef <- max(abs(as.matrix(coefDf_multi)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_demography_0.95Confidence.png", sep = "")), width = 5, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE, 
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.05, number.cex = 0.8,
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_demography_0.99Confidence.png", sep = "")), width = 5, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.01, number.cex = 0.8, 
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+```
+### 2. only baseline
+## leave one out cross validation been used to estimate model quality
+```{r}
+set.seed(0)
+
+x <- c("Monocytes_day0", "CCL3_day0", "IgG_PT_day0")
+                   
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+for (j in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x,y[j])])
+  
+  predVals <- c()
+  trueVals<- c()
+  subjId <- c()
+  vacType <- c()
+  
+  modelsList <- paste(y[j], "~", str_flatten(x, ' + '))
+  
+  for (i in 1:nrow(subDf)){
+    fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+    
+    predictor <- data.frame(subDf[i, x])
+    colnames(predictor) <- x
+    
+    predVals <- c(predVals, predict(fit_1, predictor))
+    trueVals <- c(trueVals, subDf[i, y[j]])
+    subjId <- c(subjId, subDf[i, "subject_id"])
+    vacType <- c(vacType, subDf[i, "infancy_vac"])
+  }
+  
+  trueVals <- rank(trueVals, ties.method = "average", na.last = "keep")
+  predVals <- rank(predVals, ties.method = "average", na.last = "keep")
+  correlations <- cor.test(trueVals, predVals, method="spearman")
+  pval_pred_true[y[j], "3 Tasks Baselines"] <- correlations$p.value
+  correlation_pred_true[y[j], "3 Tasks Baselines"] <- correlations$estimate
+
+  predDf <- data.frame(trueVals, predVals)
+  colnames(predDf) <- c('True_values', 'Predicted_values')
+  predDf[, "subject_id"] <- subjId
+  predDf[, "infancy_vac"] <- vacType
+  
+  p <- regPlot(predDf, 'True_values', 'Predicted_values', paste(y[j], "3 Baseline"))
+  ggsave(p, file=here(paste("./results/", subDir, "/", subDir_multiPredictor,"/predictedTrue_3baseline_", y[j], ".png", sep="")), width = 5, height = 5 , units = 'in')
+}
+```
+
+
+## the coefficient of regression line of task agains predictors been estimated for feature selection
+```{r}
+set.seed(0)
+
+x <- c("Monocytes_day0", "CCL3_day0", "IgG_PT_day0")
+                  
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+coefDf_multi <- data.frame(row.names = x)
+pvalDf_multi <- data.frame(row.names = x)
+for (i in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x, y[i])])
+  modelsList <- paste(y[i], "~", str_flatten(x, ' + '))
+  
+  fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+  sum1 <- summary(fit_1)
+  mCoeff <- as.matrix(sum1$coefficients)
+
+  coefDf_multi[y[i]] <- mCoeff[2:nrow(mCoeff), "Estimate"]
+  pvalDf_multi[y[i]] <-  mCoeff[2:nrow(mCoeff), "Pr(>|t|)"]
+}
+
+maxCoef <- max(abs(as.matrix(coefDf_multi)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_3baseline_0.95Confidence.png", sep = "")), width = 5, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.05, number.cex = 0.8,
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_3baseline_0.99Confidence.png", sep = "")), width = 5, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.01, number.cex = 0.8,
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+```
+### 3. Baseline of all three tasks combined with age, biological sex and infancy vaccine type been used to predict each of the three tasks
+
+## leave one out cross validation been used to estimate model quality
+```{r}
+set.seed(0)
+
+x <- c("age_at_boost", "infancy_vac", "biological_sex", "Monocytes_day0", "IgG_PT_day0", "CCL3_day0")
+
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+for (j in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x,y[j])])
+
+  predVals <- c()
+  trueVals<- c()
+  subjId <- c()
+  vacType <- c()
+  modelsList <- paste(y[j], "~", str_flatten(x, ' + '))
+     
+  for (i in 1:nrow(subDf)){
+    fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+    
+    predictor <- data.frame(subDf[i, x])
+    colnames(predictor) <- x
+    
+    predVals <- c(predVals, predict(fit_1, predictor))
+    trueVals <- c(trueVals, subDf[i, y[j]])
+    subjId <- c(subjId, subDf[i, "subject_id"])
+    vacType <- c(vacType, subDf[i, "infancy_vac"])
+  }
+  
+  trueVals <- rank(trueVals, ties.method = "average", na.last = "keep")
+  predVals <- rank(predVals, ties.method = "average", na.last = "keep")
+  
+  correlations <- cor.test(trueVals, predVals, method="spearman")
+  pval_pred_true[y[j], "Demographic + 3 Baselines"] <- correlations$p.value
+  correlation_pred_true[y[j], "Demographic + 3 Baselines"] <- correlations$estimate
+  # # 
+  predDf <- data.frame(trueVals, predVals)
+  colnames(predDf) <- c('True_values', 'Predicted_values')
+  
+  predDf[, "subject_id"] <- subjId
+  predDf[, "infancy_vac"] <- vacType
+  # # 
+  p <- regPlot(predDf, 'True_values', 'Predicted_values', paste(y[j], "against Demography + 3 Baseline"))
+  ggsave(p, file=here(paste("./results/", subDir, "/", subDir_multiPredictor,"/predictedTrue_demography_3baseline_", y[j], ".png", sep="")), width = 5, height = 5 , units = 'in')
+}
+```
+
+
+## the coefficient of regression line of task agains predictors been estimated for feature selection
+```{r}
+set.seed(0)
+
+x <- c("age_at_boost", "biological_sex", "infancy_vac", "Monocytes_day0", "IgG_PT_day0", "CCL3_day0")
+                   
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+
+coefDf_multi <- data.frame(row.names = x)
+pvalDf_multi <- data.frame(row.names = x)
+for (i in 1:length(y)){
+  
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x, y[i])])
+  modelsList <- paste(y[i], "~", str_flatten(x, ' + '))
+  
+  fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+  sum1 <- summary(fit_1)
+  mCoeff <- as.matrix(sum1$coefficients)
+
+  coefDf_multi[y[i]] <- mCoeff[2:nrow(mCoeff), "Estimate"]
+  pvalDf_multi[y[i]] <-  mCoeff[2:nrow(mCoeff), "Pr(>|t|)"]
+}
+
+maxCoef <- max(abs(as.matrix(coefDf_multi)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_3baseline_demography_0.95Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.05, number.cex = 0.8,
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_3baseline_demography_0.99Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.01, number.cex = 0.8,
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+```
+
+### 4. 14 baselines
+## leave one out cross validation been used to estimate model quality
+```{r}
+set.seed(0)
+
+x <- c("Monocytes_day0", "CD4Tcells_day0", "ASCs..Plasmablasts._day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0',
+       'IgG1_PT_day0','IgG1_FHA_day0','IgG4_PT_day0', 'IgG4_FHA_day0', "CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0")
+                   
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+
+for (j in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x,y[j])])
+  
+  predVals <- c()
+  trueVals<- c()
+  subjId <- c()
+  vacType <- c()
+  
+  modelsList <- paste(y[j], "~", str_flatten(x, ' + '))
+  
+  for (i in 1:nrow(subDf)){
+    fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+    predictor <- data.frame(subDf[i, x])
+
+    colnames(predictor) <- x
+    
+    predVals <- c(predVals, predict(fit_1, predictor))
+    trueVals <- c(trueVals, subDf[i, y[j]])
+    subjId <- c(subjId, subDf[i, "subject_id"])
+    vacType <- c(vacType, subDf[i, "infancy_vac"])
+  }
+  
+  trueVals <- rank(trueVals, ties.method = "average", na.last = "keep")
+  predVals <- rank(predVals, ties.method = "average", na.last = "keep")
+  
+  correlations <- cor.test(trueVals, predVals, method="spearman")
+  pval_pred_true[y[j], "14 Tasks Baselines"] <- correlations$p.value
+  correlation_pred_true[y[j], "14 Tasks Baselines"] <- correlations$estimate
+  # # 
+  predDf <- data.frame(trueVals, predVals)
+  colnames(predDf) <- c('True_values', 'Predicted_values')
+  predDf[, "subject_id"] <- subjId
+  predDf[, "infancy_vac"] <- vacType
+  # # 
+  p <- regPlot(predDf, 'True_values', 'Predicted_values', paste(y[j], "against 14 Baseline"))
+  ggsave(p, file=here(paste("./results/", subDir, "/", subDir_multiPredictor,"/predictedTrue_14baseline_", y[j], ".png", sep="")), width = 5, height = 5 , units = 'in')
+}
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_pred_true_spearman_0.95Confidence.png", sep = "")), width = 15, height = 10 , units = 'in', res = 300)
+corrplot(as.matrix(correlation_pred_true), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = as.matrix(pval_pred_true), sig.level = 0.05, number.cex = 0.8, tl.srt = 45, na.label=" ", 
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_pred_true_spearman_0.99Confidence.png", sep = "")), width = 15, height = 10 , units = 'in', res = 300)
+corrplot(as.matrix(correlation_pred_true), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = as.matrix(pval_pred_true), sig.level = 0.01, number.cex = 0.8, tl.srt = 45, na.label=" ", 
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+```
+
+
+## the coefficient of regression line of task agains predictors been estimated for feature selection
+```{r}
+set.seed(0)
+
+x <- c("Monocytes_day0", "CD4Tcells_day0", "ASCs..Plasmablasts._day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0',
+       'IgG1_PT_day0','IgG1_FHA_day0','IgG4_PT_day0', 'IgG4_FHA_day0', "CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0")
+                   
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+
+coefDf_multi <- data.frame(row.names = x)
+pvalDf_multi <- data.frame(row.names = x)
+for (i in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x, y[i])])
+  print(dim(subDf))
+  modelsList <- paste(y[i], "~", str_flatten(x, ' + '))
+  
+  fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+  
+  sum1 <- summary(fit_1)
+  mCoeff <- as.matrix(sum1$coefficients)
+
+  if (!all(is.na(mCoeff[2:nrow(mCoeff), "Pr(>|t|)"]))){
+    coefDf_multi[y[i]] <- mCoeff[2:nrow(mCoeff), "Estimate"]
+    pvalDf_multi[y[i]] <-  mCoeff[2:nrow(mCoeff), "Pr(>|t|)"]
+  }else{
+    coefDf_multi[y[i]] <- NaN
+    pvalDf_multi[y[i]] <-  NaN
+  }
+}
+
+maxCoef <- max(abs(as.matrix(coefDf_multi)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_14baseline_0.95Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.05, number.cex = 1, na.label=" ", 
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_14baseline_0.99Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.01, number.cex = 1, na.label=" ", 
+         col.lim =c(-maxCoef, maxCoef),
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+```
+
+
+### 5. Baseline of all 14 tasks combined with age, biological sex and infancy vaccine type been used to predict each of the three tasks
+
+## leave one out cross validation been used to estimate model quality
+```{r}
+set.seed(0)
+
+x <- c("age_at_boost", "infancy_vac", "biological_sex", "Monocytes_day0", "CD4Tcells_day0", "ASCs..Plasmablasts._day0", 
+       "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0', 'IgG1_PT_day0','IgG1_FHA_day0','IgG4_PT_day0', 
+       'IgG4_FHA_day0', "CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0")
+
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14")
+
+for (j in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x,y[j])])
+  predVals <- c()
+  trueVals<- c()
+  subjId <- c()
+  vacType <- c()
+  
+  modelsList <- paste(y[j], "~", str_flatten(x, ' + '))
+  
+  sampNumb <- dim(subDf)[1]
+  featureNumb <- dim(subDf)[2]
+  
+  if (sampNumb<=featureNumb){
+    pval_pred_true[y[j], "Demographic + 14 Baselines"] <- NA
+    correlation_pred_true[y[j], "Demographic + 14 Baselines"] <- NA
+  }else{
+    
+    for (i in 1:nrow(subDf)){
+      
+      fit_1 <- lm(modelsList, data=subDf[-c(i), ])
+      predictor <- data.frame(subDf[i, x])
+      colnames(predictor) <- x
+      
+      predVals <- c(predVals, predict(fit_1, predictor))
+      trueVals <- c(trueVals, subDf[i, y[j]])
+      subjId <- c(subjId, subDf[i, "subject_id"])
+      vacType <- c(vacType, subDf[i, "infancy_vac"])
+    }
+    
+    trueVals <- rank(trueVals, ties.method = "average", na.last = "keep")
+    predVals <- rank(predVals, ties.method = "average", na.last = "keep")
+    
+    correlations <- cor.test(trueVals, predVals, method="spearman")
+    pval_pred_true[y[j], "Demographic + 14 Baselines"] <- correlations$p.value
+    correlation_pred_true[y[j], "Demographic + 14 Baselines"] <- correlations$estimate
+    # # 
+    predDf <- data.frame(trueVals, predVals)
+    colnames(predDf) <- c('True_values', 'Predicted_values')
+    predDf[, "subject_id"] <- subjId
+    predDf[, "infancy_vac"] <- vacType
+    # # 
+    p <- regPlot(predDf, 'True_values', 'Predicted_values', paste(y[j], "against Demography + 14 Baseline"))
+    ggsave(p, file=here(paste("./results/", subDir, "/", subDir_multiPredictor,"/predictedTrue_demography_14baseline_", y[j], ".png", sep="")), width = 5, height = 5 , units = 'in')
+  }
+}
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_pred_true_spearman_0.95Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300)
+corrplot(as.matrix(correlation_pred_true), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = as.matrix(pval_pred_true), sig.level = 0.05, number.cex = 1.5, tl.srt = 45, na.label=" ", 
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_pred_true_spearman_0.99Confidence.png", sep = "")), width = 10, height = 5 , units = 'in', res = 300)
+corrplot(as.matrix(correlation_pred_true), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = as.matrix(pval_pred_true), sig.level = 0.01, number.cex = 1.5, tl.srt = 45, na.label=" ", 
+         cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+write.csv(pval_pred_true, here(paste("./results/", subDir, "/", subDir_multiPredictor,"/p_value_pred_true_spearman.csv", sep = "")))
+write.csv(correlation_pred_true, here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlation_pred_true_spearman.csv", sep = "")))
+
+```
+
+## the coefficient of regression line of task agains predictors been estimated for feature selection
+```{r}
+set.seed(0)
+
+x <- c("age_at_boost", "infancy_vac", "biological_sex", "Monocytes_day0", "CD4Tcells_day0", "ASCs..Plasmablasts._day0", 
+       "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0', 'IgG1_PT_day0','IgG1_FHA_day0','IgG4_PT_day0', 
+       'IgG4_FHA_day0', "CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0")
+
+y <- c("Monocytes_day1", "CCL3_day3", "IgG_PT_day14") 
+
+coefDf_multi <- data.frame(row.names = x)
+pvalDf_multi <- data.frame(row.names = x)
+for (i in 1:length(y)){
+  subDf <- na.omit(df[, c("subject_id", "infancy_vac", x, y[i])])
+  
+  if (dim(na.omit(subDf))[1]>length(x)){
+    
+    modelsList <- paste(y[i], "~", str_flatten(x, ' + '))
+    fit_1 <- lm(modelsList, data=subDf)
+    sum1 <- summary(fit_1)
+    mCoeff <- as.matrix(sum1$coefficients)
+    
+    coefDf_multi[y[i]] <- mCoeff[2:nrow(mCoeff), "Estimate"]
+    pvalDf_multi[y[i]] <-  mCoeff[2:nrow(mCoeff), "Pr(>|t|)"]
+  }else{
+    coefDf_multi[y[i]] <- NaN
+    pvalDf_multi[y[i]] <-  NaN
+  }
+}
+
+maxCoef <- max(abs(as.matrix(coefDf_multi)), na.rm = T)
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_14baseline_demography_0.95Confidence.png", sep = "")), width = 15, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.05, number.cex = 1, na.label = " ",
+         col.lim =c(-maxCoef, maxCoef), 
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+png(here(paste("./results/", subDir, "/", subDir_multiPredictor,"/correlationHeatmap_regression_14baseline_demography_0.99Confidence.png", sep = "")), width = 15, height = 5 , units = 'in', res = 300 )
+corrplot(t(as.matrix(coefDf_multi)), tl.col = 'black', addCoef.col = 1, is.corr = FALSE,
+         p.mat = t(as.matrix(pvalDf_multi)), sig.level = 0.01, number.cex = 1, na.label = " ",
+         col.lim =c(-maxCoef, maxCoef), 
+         tl.srt = 45, cl.ratio = 0.2, col = colorRampPalette(c("blue", "white","red"))(100))
+dev.off()
+
+```
+

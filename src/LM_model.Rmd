@@ -52,26 +52,9 @@ RNA_COLS <- c("CCL3_day0", "IL6_day0", "NFKBIA_day0", "XIST_day0",
 
 
 "Dataset 2020 ****************************************************************************************************************"
-subDir <- "dataset2020"
-dataFile <- "dataset2020.csv"
-readyToUseFile <- "dataset2020_logTransformed_encoded.csv"
-
-# REMOVE_OUTLIERS <- TRUE
-REMOVE_OUTLIERS <- FALSE
-
-LOG_TRANSFORM <- TRUE
-# LOG_TRANSFORM <- FALSE
-
-LOG_TRANS_COLS <- c( "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
-                    'IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14','IgG4_PT_day14','IgG4_FHA_day14')
-
-# NEGATIVE_COLS <-RNA_COLS
-NEGATIVE_COLS <- c()
-
-"Dataset 2021 ****************************************************************************************************************"
-# subDir <- "dataset2021"
-# dataFile <- "dataset2021.csv"
-# readyToUseFile <- "dataset2021_logTransformed_encoded.csv"
+# subDir <- "dataset2020"
+# dataFile <- "dataset2020.csv"
+# readyToUseFile <- "dataset2020_logTransformed_encoded.csv"
 # 
 # # REMOVE_OUTLIERS <- TRUE
 # REMOVE_OUTLIERS <- FALSE
@@ -79,13 +62,30 @@ NEGATIVE_COLS <- c()
 # LOG_TRANSFORM <- TRUE
 # # LOG_TRANSFORM <- FALSE
 # 
-# LOG_TRANS_COLS <- c("CCL3_day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0','IgG1_FHA_day0',
-#                     'IgG4_PT_day0','IgG4_FHA_day0', "IL6_day0", "NFKBIA_day0", "XIST_day0",
-#                     "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
+# LOG_TRANS_COLS <- c( "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
 #                     'IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14','IgG4_PT_day14','IgG4_FHA_day14')
 # 
 # # NEGATIVE_COLS <-RNA_COLS
 # NEGATIVE_COLS <- c()
+
+"Dataset 2021 ****************************************************************************************************************"
+subDir <- "dataset2021"
+dataFile <- "dataset2021.csv"
+readyToUseFile <- "dataset2021_logTransformed_encoded.csv"
+
+# REMOVE_OUTLIERS <- TRUE
+REMOVE_OUTLIERS <- FALSE
+
+LOG_TRANSFORM <- TRUE
+# LOG_TRANSFORM <- FALSE
+
+LOG_TRANS_COLS <- c("CCL3_day0", "IgG_PT_day0",'IgG_FHA_day0','IgG_PRN_day0','IgG1_PT_day0','IgG1_FHA_day0',
+                    'IgG4_PT_day0','IgG4_FHA_day0', "IL6_day0", "NFKBIA_day0", "XIST_day0",
+                    "CCL3_day3", "IL6_day3", "NFKBIA_day7", "XIST_day14", "IgG_PT_day14",'IgG_FHA_day14',
+                    'IgG_PRN_day14','IgG1_PT_day14','IgG1_FHA_day14','IgG4_PT_day14','IgG4_FHA_day14')
+
+# NEGATIVE_COLS <-RNA_COLS
+NEGATIVE_COLS <- c()
 
 "Combined Dataset ****************************************************************************************************************"
 # subDir <- "combined_datasets2020_2021"

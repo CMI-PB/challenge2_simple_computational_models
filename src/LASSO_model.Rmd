@@ -106,7 +106,10 @@ NEGATIVE_COLS <- c()
 # # NEGATIVE_COLS <- c()
 
 "Create subdirectories ****************************************************************************************************************"
+dir.create(here(file.path('./results', subDir)), showWarnings = FALSE)
+
 subDir_multiPredictor <- "3_multiPredictor"
+dir.create(here(file.path('./results', subDir, subDir_multiPredictor)), showWarnings = FALSE)
 dir.create(here(file.path('./results', subDir, "3_multiPredictor/LASSO")), showWarnings = FALSE)
 ```
 
